@@ -1,8 +1,6 @@
 require 'nn'
 require 'cunn'
 
-require('probe')
-
 local backend_name = 'cudnn'
 
 local backend
@@ -26,7 +24,6 @@ end
 
 -- Residual block contains two ConvBnRelu and a shortcut connection
 local function ResBlock(nIn, nOut, subsample)
-  subsample = subsample or false
   local concat
   if subsample then
     local conv = nn.Sequential()

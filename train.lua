@@ -7,8 +7,8 @@ local c = require 'trepl.colorize'
 opt = lapp[[
    -s,--save                  (default "logs")      subdirectory to save logs
    -b,--batchSize             (default 128)          batch size
-   -r,--learningRate          (default 1)        learning rate
-   --learningRateDecay        (default 1e-7)      learning rate decay
+   -r,--learningRate          (default 0.1)        learning rate
+   --learningRateDecay        (default 0)          learning rate decay
    --weightDecay              (default 0.0005)      weightDecay
    -m,--momentum              (default 0.9)         momentum
    --epoch_step               (default 25)          epoch step
@@ -39,9 +39,40 @@ do -- data augmentation module
   end
 end
 
+do
+  local BatchAugment, parent = torch.class('nn.BatchAugment', 'nn.Module')
+
+  function BatchAugment:__init()
+    parent.__init(self)
+    self.train = true
+  end
+
+  function BatchAugment:updateOutput(input)
+    if self.train then
+      self.output:resizeAs(input):fill(0)
+      local bs = input:size(1)
+      local flipMask = torch.randperm(bs):le(bs/2)
+      local offsetX = torch.IntTensor(bs):apply(function() return math.random(-4,4) end)
+      local offsetY = torch.IntTensor(bs):apply(function() return math.random(-4,4) end)
+      for i = 1, bs do
+        if flipMask[i] == 1 then image.hflip(input[i], input[i]) end
+        local offX, offY = offsetX[i], offsetY[i]
+        local srcX, srcY = math.max(0, -offX), math.max(0, -offY)
+        local dstX, dstY = math.max(0, offX), math.max(0, offY)
+        local cropW, cropH = 32 - math.abs(offX), 32 - math.abs(offY)
+        self.output[i]:narrow(2,dstY+1,cropH):narrow(3,dstX+1,cropW):copy(
+          input[i]:narrow(2,srcY+1,cropH):narrow(3,srcX+1,cropW))
+      end
+    else
+      self.output = input
+    end
+    return self.output
+  end
+end
+
 print(c.blue '==>' ..' configuring model')
 local model = nn.Sequential()
-model:add(nn.BatchFlip():float())
+model:add(nn.BatchAugment():float())
 model:add(nn.Copy('torch.FloatTensor','torch.CudaTensor'):cuda())
 model:add(dofile('models/'..opt.model..'.lua'):cuda())
 model:get(2).updateGradInput = function(input) return end
@@ -81,7 +112,17 @@ function train()
   epoch = epoch or 1
 
   -- drop learning rate every "epoch_step" epochs
-  if epoch % opt.epoch_step == 0 then optimState.learningRate = optimState.learningRate/2 end
+  -- if epoch % opt.epoch_step == 0 then optimState.learningRate = optimState.learningRate/2 end
+
+  -- hard scheduled learning rate
+  local epochSize = 390
+  if epoch <= math.floor(400 / epochSize) then
+    optimState.learningRate = 0.01 -- warm up
+  elseif epoch <= math.floor(32000 / epochSize) then
+    optimState.learningRate = 0.1
+  elseif epoch <= math.floor(48000 / epochSize) then
+    optimState.learningRate = 0.01
+  end
   
   print(c.blue '==>'.." online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
 

@@ -9,6 +9,7 @@ local resnet = nn.Sequential()
 
 -- a residual block contains two convs and a shortcut
 local function ResBlock(nIn, nOut, subsample)
+  local block = nn.Sequential()
   local concat
   if subsample then
     local conv = nn.Sequential()
@@ -26,7 +27,10 @@ local function ResBlock(nIn, nOut, subsample)
     conv:add(backend.SpatialConvolution(nOut, nOut, 3,3, 1,1, 1,1))
     concat = nn.ConcatTable():add(conv):add(nn.Identity())
   end
-  return nn.Sequential():add(concat):add(nn.CAddTable()):add(backend.ReLU(true))
+  block:add(concat)
+  block:add(nn.CAddTable())
+  block:add(backend.ReLU(true))
+  return block
 end
 
 -- a residual group contains n residual blocks

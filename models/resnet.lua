@@ -1,57 +1,51 @@
-require 'nn'
-require 'cunn'
+require('nn')
+require('cunn')
+require('cudnn')
 
-local backend_name = 'cudnn'
 
-local backend
-if backend_name == 'cudnn' then
-  require 'cudnn'
-  backend = cudnn
-else
-  backend = nn
-end
+local backend = cudnn
 
 local resnet = nn.Sequential()
 
--- Convolutional + SpatialBatchNormalization + ReLU
-local function ConvBnRelu(nIn, nOut, k, s, p)
-  local block = nn.Sequential()
-  block:add(backend.SpatialConvolution(nIn, nOut, k,k, s,s, p,p))
-  block:add(nn.SpatialBatchNormalization(nOut, 1e-3))
-  block:add(backend.ReLU(true))
-  return block
-end
-
--- Residual block contains two ConvBnRelu and a shortcut connection
+-- a residual block contains two convs and a shortcut
 local function ResBlock(nIn, nOut, subsample)
   local concat
   if subsample then
     local conv = nn.Sequential()
-    conv:add(ConvBnRelu(nIn, nOut, 3, 2, 1))
-    conv:add(ConvBnRelu(nOut, nOut, 3, 1, 1))
-    local shortcut = ConvBnRelu(nIn, nOut, 1, 2, 0)
+    conv:add(backend.SpatialConvolution(nIn, nOut, 3,3, 2,2, 1,1))
+    conv:add(nn.SpatialBatchNormalization(nOut, 1e-3))
+    conv:add(backend.ReLU(true))
+    conv:add(backend.SpatialConvolution(nOut, nOut, 3,3, 1,1, 1,1))
+    local shortcut = backend.SpatialConvolution(nIn, nOut, 1,1, 2,2, 0,0)
     concat = nn.ConcatTable():add(conv):add(shortcut)
   else
     local conv = nn.Sequential()
-    conv:add(ConvBnRelu(nIn, nOut, 3, 1, 1))
-    conv:add(ConvBnRelu(nOut, nOut, 3, 1, 1))
+    conv:add(backend.SpatialConvolution(nIn, nOut, 3,3, 1,1, 1,1))
+    conv:add(nn.SpatialBatchNormalization(nOut, 1e-3))
+    conv:add(backend.ReLU(true))
+    conv:add(backend.SpatialConvolution(nOut, nOut, 3,3, 1,1, 1,1))
     concat = nn.ConcatTable():add(conv):add(nn.Identity())
   end
   return nn.Sequential():add(concat):add(nn.CAddTable()):add(backend.ReLU(true))
 end
 
-local function AddResGroup(nIn, nOut, n, firstSub)
-  resnet:add(ResBlock(nIn, nOut, firstSub))
+-- a residual group contains n residual blocks
+local function ResGroup(nIn, nOut, n, firstSub)
+  local group = nn.Sequential()
+  group:add(ResBlock(nIn, nOut, firstSub))
   for i = 1, n-1 do
-    resnet:add(ResBlock(nOut, nOut, false))
+    group:add(ResBlock(nOut, nOut, false))
   end
+  return group
 end
 
 local n = 18
-resnet:add(ConvBnRelu(3,16,3,1,1))
-AddResGroup(16,16,n,false)
-AddResGroup(16,32,n,true)
-AddResGroup(32,64,n,true)
+resnet:add(backend.SpatialConvolution(3, 16, 3,3, 1,1, 1,1))
+resnet:add(nn.SpatialBatchNormalization(16, 1e-3))
+resnet:add(backend.ReLU(true))
+resnet:add(ResGroup(16,16,n,false))
+resnet:add(ResGroup(16,32,n,true))
+resnet:add(ResGroup(32,64,n,true))
 resnet:add(backend.SpatialAveragePooling(8,8,1,1,0,0))
 resnet:add(nn.Reshape(64))
 resnet:add(nn.Linear(64,10))

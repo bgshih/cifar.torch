@@ -9,7 +9,7 @@ opt = lapp[[
    -b,--batchSize             (default 128)          batch size
    -r,--learningRate          (default 0.1)        learning rate
    --learningRateDecay        (default 0)          learning rate decay
-   --weightDecay              (default 0.0005)      weightDecay
+   --weightDecay              (default 0.0001)      weightDecay
    -m,--momentum              (default 0.9)         momentum
    --epoch_step               (default 25)          epoch step
    --model                    (default vgg_bn_drop)     model name
@@ -49,8 +49,8 @@ do
 
   function BatchAugment:updateOutput(input)
     if self.train then
-      self.output:resizeAs(input):fill(0)
       local bs = input:size(1)
+      self.output:resizeAs(input):fill(0)
       local flipMask = torch.randperm(bs):le(bs/2)
       local offsetX = torch.IntTensor(bs):apply(function() return math.random(-4,4) end)
       local offsetY = torch.IntTensor(bs):apply(function() return math.random(-4,4) end)
@@ -66,6 +66,7 @@ do
     else
       self.output = input
     end
+
     return self.output
   end
 end
@@ -122,6 +123,8 @@ function train()
     optimState.learningRate = 0.1
   elseif epoch <= math.floor(48000 / epochSize) then
     optimState.learningRate = 0.01
+  else
+    optimState.learningRate = 0.001
   end
   
   print(c.blue '==>'.." online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
